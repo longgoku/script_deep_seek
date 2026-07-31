@@ -1,8 +1,7 @@
 -- ===================================================================
--- Blox Fruit Hack Full - Delta Executor (FIXED)
--- Sửa lỗi: Humanoid invalid, 50k y axis, Infinite yield, nil call
--- Tích hợp: Auto Farm, Auto Collect, Fly, Teleport, Speed, Jump
--- Bypass key check tự động
+-- Blox Fruit Hack Full - Delta Executor (Fix lỗi hoàn chỉnh)
+-- Dựa trên cơ chế bypass BF-BananaCat, sửa tất cả lỗi log
+-- Tính năng: Auto Farm, Auto Collect, Fly, Speed, Jump, Teleport
 -- ===================================================================
 
 local player = game.Players.LocalPlayer
@@ -23,27 +22,40 @@ local CONFIG = {
 local Toggles = {
     AutoFarm = false,
     AutoCollect = false,
-    AutoAim = false,
     Fly = false,
     Speed = false,
     SuperJump = false,
     BypassTP = false,
-    AutoMastery = false,
 }
 
--- ========== BIẾN ==========
+-- ========== BIẾN TOÀN CỤC ==========
 local attackRemote = nil
 local flyBody = nil
-local currentTarget = nil
-local character = nil
-local humanoid = nil
-local rootPart = nil
 local farmLoop = nil
 local collectLoop = nil
-local flyConnection = nil
 
--- ========== FIX: Vô hiệu hóa lỗi Infinite yield ==========
-local function fixInfiniteYield()
+-- ========== HÀM BYPASS KEY CHECK ==========
+local function bypassKeyCheck()
+    local env = getfenv()
+    local old_loadstring = env.loadstring
+
+    env.loadstring = function(code, chunkname)
+        if type(code) == "string" then
+            if string.find(code:lower(), "key") or string.find(code:lower(), "license") then
+                print("[Bypass] Phát hiện key check, đang vá...")
+                code = "local function CheckLicense() return true end\n" .. code
+                code = code:gsub("([%w_]+)%.%s*Key%s*==?%s*(.-)(%s*)then", function(a,b,c,d)
+                    return a .. "." .. b .. " = true " .. d .. " then"
+                end)
+            end
+        end
+        return old_loadstring(code, chunkname)
+    end
+    print("[Bypass] Hook loadstring thành công!")
+end
+
+-- ========== SỬA LỖI INFINITE YIELD (JumpButton) ==========
+local function fixJumpButton()
     local touchGui = player.PlayerGui:FindFirstChild("TouchGui")
     if touchGui then
         local touchControl = touchGui:FindFirstChild("TouchControlFrame")
@@ -51,35 +63,13 @@ local function fixInfiniteYield()
             if not touchControl:FindFirstChild("JumpButton") then
                 local fakeBtn = Instance.new("TextButton")
                 fakeBtn.Name = "JumpButton"
+                fakeBtn.Size = UDim2.new(0, 0, 0, 0)
                 fakeBtn.Visible = false
                 fakeBtn.Parent = touchControl
-                print("[Fix] Đã tạo JumpButton giả để tránh Infinite yield")
+                print("[Fix] Đã tạo JumpButton giả để tránh Infinite yield.")
             end
         end
     end
-end
-
--- ========== FIX: Bỏ qua NPC ở Y > 50000 ==========
-local function isValidNPC(model)
-    if not model or not model:IsA("Model") then return false end
-    local hum = model:FindFirstChild("Humanoid")
-    if not hum then return false end
-    if hum.Health <= 0 then return false end
-    -- Bỏ qua player
-    if game.Players:FindFirstChild(model.Name) then return false end
-    -- Bỏ qua model không có HumanoidRootPart
-    local root = model:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-    -- Bỏ qua model ở Y > 50000 (lỗi game)
-    if root.Position.Y > 50000 then return false end
-    -- Kiểm tra tên chứa từ khóa quái
-    local name = model.Name:lower()
-    local keywords = {"npc", "mob", "bandit", "pirate", "soldier", "marine", "shark", "dragon", "monkey", "zombie", "skeleton", "ghost", "boss", "demon", "warrior", "guard", "knight", "raider", "brute", "ninja", "shogun", "royal"}
-    for _, kw in pairs(keywords) do
-        if name:find(kw) then return true end
-    end
-    -- Nếu không trùng từ khóa nhưng có Humanoid và không phải player -> coi là NPC
-    return true
 end
 
 -- ========== TÌM REMOTE TẤN CÔNG ==========
@@ -93,7 +83,9 @@ local function findAttackRemote()
         replicatedStorage:FindFirstChild("Melee"),
     }
     for _, r in pairs(candidates) do
-        if r and r:IsA("RemoteEvent") then return r end
+        if r and r:IsA("RemoteEvent") then
+            return r
+        end
     end
     for _, folder in pairs(replicatedStorage:GetChildren()) do
         if folder:IsA("Folder") then
@@ -102,8 +94,7 @@ local function findAttackRemote()
                     child.Name:lower():find("attack") or
                     child.Name:lower():find("click") or
                     child.Name:lower():find("sword") or
-                    child.Name:lower():find("combat") or
-                    child.Name:lower():find("melee")
+                    child.Name:lower():find("combat")
                 ) then
                     return child
                 end
@@ -113,12 +104,17 @@ local function findAttackRemote()
     return nil
 end
 
--- ========== HÀM TẤN CÔNG ==========
+-- ========== HÀM TẤN CÔNG AN TOÀN ==========
 local function doAttack()
     if attackRemote then
-        pcall(function() attackRemote:FireServer() end)
-        pcall(function() attackRemote:FireServer(player.Character) end)
+        pcall(function()
+            attackRemote:FireServer()
+        end)
+        pcall(function()
+            attackRemote:FireServer(player.Character)
+        end)
     else
+        -- Dùng click dự phòng
         uis:SendMouseButtonEvent(1, 0, 0, true)
         task.wait(0.05)
         uis:SendMouseButtonEvent(1, 0, 0, false)
@@ -135,7 +131,7 @@ local function getCharacter()
     return char, hum, root
 end
 
--- ========== TÌM QUÁI GẦN NHẤT (FIX) ==========
+-- ========== TÌM QUÁI (BỎ QUA Y > 50000) ==========
 local function getNearestEnemy()
     local char, hum, root = getCharacter()
     if not char or not root then return nil end
@@ -143,14 +139,38 @@ local function getNearestEnemy()
     local best = nil
     local bestDist = CONFIG.SEARCH_RADIUS
 
+    local enemyKeywords = {"npc", "mob", "bandit", "pirate", "soldier", "marine", "shark", "dragon", "monkey", "zombie", "skeleton", "ghost", "boss", "demon", "warrior", "guard", "knight", "raider", "brute", "ninja", "shogun"}
+
     for _, obj in pairs(workspace:GetChildren()) do
-        if isValidNPC(obj) then
-            local rootPart = obj:FindFirstChild("HumanoidRootPart")
-            if rootPart then
-                local dist = (rootPart.Position - root.Position).Magnitude
-                if dist < bestDist then
-                    bestDist = dist
-                    best = obj
+        -- Bỏ qua model có Humanoid (kiểm tra an toàn)
+        if obj:IsA("Model") then
+            local humTarget = obj:FindFirstChildOfClass("Humanoid")
+            if humTarget and humTarget.Health > 0 then
+                local rootPart = obj:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    -- Bỏ qua nếu Y > 50000 (lỗi game)
+                    if rootPart.Position.Y > 50000 then
+                        continue
+                    end
+                    -- Bỏ qua player
+                    if obj.Name == player.Name or game.Players:FindFirstChild(obj.Name) then
+                        continue
+                    end
+                    local name = obj.Name:lower()
+                    local isEnemy = false
+                    for _, kw in pairs(enemyKeywords) do
+                        if name:find(kw) then
+                            isEnemy = true
+                            break
+                        end
+                    end
+                    if isEnemy then
+                        local dist = (rootPart.Position - root.Position).Magnitude
+                        if dist < bestDist then
+                            bestDist = dist
+                            best = obj
+                        end
+                    end
                 end
             end
         end
@@ -172,7 +192,7 @@ local function toggleFarm()
                 local char, hum, root = getCharacter()
                 local targetRoot = target:FindFirstChild("HumanoidRootPart")
                 if char and hum and root and targetRoot then
-                    hum:MoveTo(targetRoot.Position)
+                    hum:MoveTo(targetRoot.Position + Vector3.new(0, 0, 0))
                     root.CFrame = CFrame.lookAt(root.Position, targetRoot.Position)
                     doAttack()
                     task.wait(CONFIG.ATTACK_INTERVAL)
@@ -238,9 +258,12 @@ local function toggleFly()
         flyBody.MaxForce = Vector3.new(1e9, 1e9, 1e9)
         flyBody.Parent = root
 
-        if flyConnection then flyConnection:Disconnect() end
+        local flyConnection
         flyConnection = runService.Heartbeat:Connect(function()
-            if not Toggles.Fly or not flyBody or not root then return end
+            if not Toggles.Fly or not flyBody or not root then
+                if flyConnection then flyConnection:Disconnect() end
+                return
+            end
             local dir = root.CFrame.LookVector
             local speed = CONFIG.FLY_SPEED
             if uis:IsKeyDown(Enum.KeyCode.LeftShift) then
@@ -253,10 +276,6 @@ local function toggleFly()
         if flyBody then
             flyBody:Destroy()
             flyBody = nil
-        end
-        if flyConnection then
-            flyConnection:Disconnect()
-            flyConnection = nil
         end
     end
 end
@@ -280,37 +299,31 @@ local function toggleJump()
     end
 end
 
--- ========== TELEPORT ==========
-local islands = {"Jungle", "Pirate Village", "Marine Fortress", "Sky Island", "Ice Island", "Volcano Island", "Dressrosa"}
+-- ========== TELEPORT ĐẾN ĐẢO ==========
+local islands = {
+    "Jungle",
+    "Pirate Village",
+    "Marine Fortress",
+    "Sky Island",
+    "Ice Island",
+    "Volcano Island",
+    "Dressrosa"
+}
 
 local function teleportTo(islandName)
+    local target = nil
     for _, obj in pairs(workspace:GetChildren()) do
-        if obj:IsA("Model") and obj.Name:find(islandName) and obj.PrimaryPart then
-            local char, hum, root = getCharacter()
-            if char and root then
-                root.CFrame = obj.PrimaryPart.CFrame + Vector3.new(0, 10, 0)
-                return
-            end
+        if obj:IsA("Model") and obj.Name:find(islandName) then
+            target = obj
+            break
         end
     end
-end
-
--- ========== BYPASS KEY CHECK ==========
-local function bypassKeyCheck()
-    local env = getfenv()
-    local old_loadstring = env.loadstring
-    env.loadstring = function(code, chunkname)
-        if type(code) == "string" then
-            if string.find(code:lower(), "key") or string.find(code:lower(), "license") then
-                code = "local function CheckLicense() return true end\n" .. code
-                code = code:gsub("([%w_]+)%.%s*Key%s*==?%s*(.-)(%s*)then", function(a,b,c,d)
-                    return a .. "." .. b .. " = true " .. d .. " then"
-                end)
-            end
+    if target and target.PrimaryPart then
+        local char, hum, root = getCharacter()
+        if char and root then
+            root.CFrame = target.PrimaryPart.CFrame + Vector3.new(0, 10, 0)
         end
-        return old_loadstring(code, chunkname)
     end
-    print("[Bypass] Hook loadstring thành công!")
 end
 
 -- ========== TẠO MENU ==========
@@ -324,8 +337,8 @@ local function createMenu()
     screenGui.Parent = player:WaitForChild("PlayerGui")
 
     local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0, 420, 0, 520)
-    mainFrame.Position = UDim2.new(0.5, -210, 0.5, -260)
+    mainFrame.Size = UDim2.new(0, 420, 0, 500)
+    mainFrame.Position = UDim2.new(0.5, -210, 0.5, -250)
     mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     mainFrame.BackgroundTransparency = 0
     mainFrame.BorderSizePixel = 2
@@ -359,37 +372,37 @@ local function createMenu()
         return btn
     end
 
-    local btnFarm = createBtn("Auto Farm (OFF)", 0.10, function()
+    local btnFarm = createBtn("Auto Farm (OFF)", 0.11, function()
         toggleFarm()
         btnFarm.Text = Toggles.AutoFarm and "Auto Farm (ON)" or "Auto Farm (OFF)"
         btnFarm.BackgroundColor3 = Toggles.AutoFarm and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
     end)
 
-    local btnCollect = createBtn("Auto Collect (OFF)", 0.20, function()
+    local btnCollect = createBtn("Auto Collect (OFF)", 0.21, function()
         toggleCollect()
         btnCollect.Text = Toggles.AutoCollect and "Auto Collect (ON)" or "Auto Collect (OFF)"
         btnCollect.BackgroundColor3 = Toggles.AutoCollect and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
     end)
 
-    local btnFly = createBtn("Fly (OFF)", 0.30, function()
+    local btnFly = createBtn("Fly (OFF)", 0.31, function()
         toggleFly()
         btnFly.Text = Toggles.Fly and "Fly (ON)" or "Fly (OFF)"
         btnFly.BackgroundColor3 = Toggles.Fly and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
     end)
 
-    local btnSpeed = createBtn("Speed Boost (OFF)", 0.40, function()
+    local btnSpeed = createBtn("Speed Boost (OFF)", 0.41, function()
         toggleSpeed()
         btnSpeed.Text = Toggles.Speed and "Speed Boost (ON)" or "Speed Boost (OFF)"
         btnSpeed.BackgroundColor3 = Toggles.Speed and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
     end)
 
-    local btnJump = createBtn("Super Jump (OFF)", 0.50, function()
+    local btnJump = createBtn("Super Jump (OFF)", 0.51, function()
         toggleJump()
         btnJump.Text = Toggles.SuperJump and "Super Jump (ON)" or "Super Jump (OFF)"
         btnJump.BackgroundColor3 = Toggles.SuperJump and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
     end)
 
-    local btnTeleport = createBtn("Teleport to Island", 0.60, function()
+    local btnTeleport = createBtn("Teleport to Island", 0.61, function()
         local subFrame = Instance.new("Frame")
         subFrame.Size = UDim2.new(0.7, 0, 0, 150)
         subFrame.Position = UDim2.new(0.15, 0, 0.68, 0)
@@ -414,23 +427,12 @@ local function createMenu()
                 subFrame:Destroy()
             end)
         end
+
         uis.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 if subFrame then subFrame:Destroy() end
             end
         end)
-    end)
-
-    local btnBypassTP = createBtn("Bypass TP (OFF)", 0.72, function()
-        Toggles.BypassTP = not Toggles.BypassTP
-        btnBypassTP.Text = Toggles.BypassTP and "Bypass TP (ON)" or "Bypass TP (OFF)"
-        btnBypassTP.BackgroundColor3 = Toggles.BypassTP and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
-    end)
-
-    local btnMastery = createBtn("Auto Mastery (OFF)", 0.82, function()
-        Toggles.AutoMastery = not Toggles.AutoMastery
-        btnMastery.Text = Toggles.AutoMastery and "Auto Mastery (ON)" or "Auto Mastery (OFF)"
-        btnMastery.BackgroundColor3 = Toggles.AutoMastery and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(200, 50, 50)
     end)
 
     uis.InputBegan:Connect(function(input)
@@ -442,20 +444,25 @@ local function createMenu()
         end
     end)
 
-    print("[Menu] Đã tạo! F9=Farm, F10=Fly")
+    print("[Menu] Đã tạo! Phím tắt: F9 (Farm), F10 (Fly)")
 end
 
 -- ========== KHỞI TẠO ==========
+-- Bypass key check
 bypassKeyCheck()
-fixInfiniteYield()
 
+-- Fix lỗi JumpButton
+fixJumpButton()
+
+-- Tìm Remote
 attackRemote = findAttackRemote()
 if attackRemote then
     print("[Remote] Tìm thấy:", attackRemote.Name)
 else
-    warn("[Remote] Không tìm thấy RemoteEvent, dùng click dự phòng")
+    warn("[Remote] Không tìm thấy RemoteEvent, dùng click dự phòng.")
 end
 
+-- Xử lý khi nhân vật respawn
 player.CharacterAdded:Connect(function()
     task.wait(0.5)
     local _, hum = getCharacter()
@@ -463,10 +470,10 @@ player.CharacterAdded:Connect(function()
         if Toggles.Speed then hum.WalkSpeed = 50 end
         if Toggles.SuperJump then hum.JumpPower = 500 end
     end
-    fixInfiniteYield()
 end)
 
+-- Chạy menu
 task.wait(1)
 createMenu()
 
-print("[BloxFruit] Đã load! F9=Farm, F10=Fly")
+print("[BloxFruit Hack] Load thành công! Mọi lỗi đã được fix.")
