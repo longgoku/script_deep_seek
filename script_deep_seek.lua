@@ -1,21 +1,28 @@
--- =====================================
--- BLOX FRUIT AUTO FARM (Delta/Mobile)
--- Bấm F9 để bật/tắt
--- =====================================
+-- =============================================
+-- BLOX FRUIT AUTO FARM - FIX (dùng click chuột + tìm NPC đúng)
+-- Không dùng RemoteEvent, không dùng Humanoid
+-- =============================================
 
 local player = game.Players.LocalPlayer
+local runService = game:GetService("RunService")
 local uis = game:GetService("UserInputService")
-local rs = game:GetService("RunService")
+local vim = game:GetService("VirtualInputManager") -- Bắt buộc cho Delta
 
-local isFarming = false
-local farmConnection = nil
+-- ===== CẤU HÌNH =====
+local ATTACK_INTERVAL = 0.12
+local SEARCH_RADIUS = 50
+local AUTO_FARM = false
 
--- Cấu hình
-local ATTACK_DELAY = 0.1
-local SEARCH_RADIUS = 30
+-- ===== HÀM CLICK CHUỘT (mô phỏng tấn công) =====
+local function doAttack()
+    -- Click trái
+    vim:SendMouseButtonEvent(1, 0, 0, true, game, 1)
+    task.wait(0.05)
+    vim:SendMouseButtonEvent(1, 0, 0, false, game, 1)
+end
 
--- Hàm tìm quái gần nhất (dựa vào tên)
-local function getNearestEnemy()
+-- ===== TÌM NPC GẦN NHẤT (bằng tên chính xác từ log) =====
+local function getNearestNPC()
     local char = player.Character
     if not char then return nil end
     local root = char:FindFirstChild("HumanoidRootPart")
@@ -24,16 +31,25 @@ local function getNearestEnemy()
     local best = nil
     local bestDist = SEARCH_RADIUS
 
-    for _, obj in pairs(game.Workspace:GetChildren()) do
-        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") then
-            local hum = obj:FindFirstChild("Humanoid")
-            if hum and hum.Health > 0 then
-                -- Bỏ qua người chơi
-                if not game.Players:FindFirstChild(obj.Name) then
-                    local rootPart = obj:FindFirstChild("HumanoidRootPart")
-                    if rootPart then
-                        local dist = (rootPart.Position - root.Position).Magnitude
-                        if dist < bestDist then
+    -- QUAN TRỌNG: Lấy tất cả model trong Workspace
+    for _, obj in pairs(workspace:GetChildren()) do
+        -- Kiểm tra nếu obj là NPC (có tên như "Prisoner", "Bandit", v.v.)
+        if obj:IsA("Model") and obj.Name ~= player.Name then
+            -- Lọc tên NPC dựa trên từ khóa thường gặp (mở rộng theo game)
+            local name = obj.Name:lower()
+            if name:find("prisoner") or name:find("bandit") or name:find("pirate") or 
+               name:find("soldier") or name:find("marine") or name:find("monkey") or
+               name:find("shark") or name:find("dragon") or name:find("zombie") or
+               name:find("skeleton") or name:find("ghost") or name:find("npc") or
+               name:find("mob") then
+                
+                -- Tìm HumanoidRootPart (thay vì Humanoid)
+                local npcRoot = obj:FindFirstChild("HumanoidRootPart")
+                if npcRoot then
+                    -- Bỏ qua NPC quá cao (lỗi >50k y)
+                    if math.abs(npcRoot.Position.Y) < 50000 then
+                        local dist = (npcRoot.Position - root.Position).Magnitude
+                        if dist < bestDist and dist > 0 then
                             bestDist = dist
                             best = obj
                         end
@@ -45,100 +61,75 @@ local function getNearestEnemy()
     return best
 end
 
--- Hàm tấn công (mô phỏng click chuột)
-local function attack()
-    -- Thử dùng VirtualInputManager (thường có trong Delta)
-    local vim = game:GetService("VirtualInputManager")
-    if vim then
-        vim:SendMouseButtonEvent(1, 0, 0, true, game, 1)
-        task.wait(0.05)
-        vim:SendMouseButtonEvent(1, 0, 0, false, game, 1)
-        return true
-    end
-
-    -- Fallback: dùng mouse click (nếu có)
-    local mouse = player:GetMouse()
-    if mouse then
-        mouse.Button1Down:Fire()
-        task.wait(0.05)
-        mouse.Button1Up:Fire()
-        return true
-    end
-
-    print("⚠️ Không tìm thấy cách tấn công!")
-    return false
-end
-
--- Hàm bật/tắt farm
+-- ===== VÒNG LẶP FARM =====
+local farmTask = nil
 local function toggleFarm()
-    isFarming = not isFarming
+    AUTO_FARM = not AUTO_FARM
+    print("Auto Farm:", AUTO_FARM and "BẬT" or "TẮT")
 
-    if isFarming then
-        print("✅ Auto Farm BẬT")
-        farmConnection = rs.Heartbeat:Connect(function()
-            if not isFarming then return end
-
-            local target = getNearestEnemy()
+    if AUTO_FARM then
+        if farmTask then farmTask:Disconnect() end
+        farmTask = runService.Heartbeat:Connect(function()
+            if not AUTO_FARM then return end
+            local target = getNearestNPC()
             if target then
                 local char = player.Character
                 if char then
-                    local hum = char:FindFirstChild("Humanoid")
-                    local root = char:FindFirstChild("HumanoidRootPart")
-                    local targetRoot = target:FindFirstChild("HumanoidRootPart")
-                    if hum and root and targetRoot then
-                        -- Di chuyển đến quái
-                        hum:MoveTo(targetRoot.Position)
-                        -- Quay mặt về phía quái
-                        root.CFrame = CFrame.lookAt(root.Position, targetRoot.Position)
-                        -- Tấn công
-                        attack()
-                        task.wait(ATTACK_DELAY)
+                    local humanoid = char:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        -- Di chuyển đến target
+                        local targetRoot = target:FindFirstChild("HumanoidRootPart")
+                        if targetRoot then
+                            humanoid:MoveTo(targetRoot.Position)
+                            -- Quay mặt
+                            local root = char:FindFirstChild("HumanoidRootPart")
+                            if root then
+                                root.CFrame = CFrame.lookAt(root.Position, targetRoot.Position)
+                            end
+                            -- Đánh (click)
+                            doAttack()
+                            task.wait(ATTACK_INTERVAL)
+                        end
                     end
                 end
-            else
-                -- Nếu không có quái, in ra log (để debug)
-                print("🔍 Không tìm thấy quái trong phạm vi")
             end
         end)
     else
-        print("❌ Auto Farm TẮT")
-        if farmConnection then
-            farmConnection:Disconnect()
-            farmConnection = nil
+        if farmTask then
+            farmTask:Disconnect()
+            farmTask = nil
         end
     end
 end
 
--- Tạo nút bấm trên màn hình (cho mobile)
-local gui = Instance.new("ScreenGui")
-gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
-
-local btn = Instance.new("TextButton")
-btn.Size = UDim2.new(0, 100, 0, 40)
-btn.Position = UDim2.new(0.85, -50, 0.05, 0)
-btn.Text = "Farm OFF"
-btn.TextColor3 = Color3.fromRGB(255,255,255)
-btn.BackgroundColor3 = Color3.fromRGB(200,50,50)
-btn.Font = Enum.Font.GothamBold
-btn.TextSize = 16
-btn.BorderSizePixel = 0
-btn.Parent = gui
-
-btn.MouseButton1Click:Connect(function()
-    toggleFarm()
-    btn.Text = isFarming and "Farm ON" or "Farm OFF"
-    btn.BackgroundColor3 = isFarming and Color3.fromRGB(50,200,50) or Color3.fromRGB(200,50,50)
-end)
-
--- Phím tắt F9
+-- ===== BIND PHÍM F9 =====
 uis.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.F9 then
         toggleFarm()
-        btn.Text = isFarming and "Farm ON" or "Farm OFF"
-        btn.BackgroundColor3 = isFarming and Color3.fromRGB(50,200,50) or Color3.fromRGB(200,50,50)
     end
 end)
 
-print("✅ Script đã sẵn sàng! Bấm F9 hoặc nút trên màn hình để bắt đầu.")
-print("💡 Kiểm tra Console (F9) để xem log tìm quái.")
+-- ===== MENU TRÊN MÀN HÌNH =====
+local screenGui = Instance.new("ScreenGui")
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui") or game:GetService("CoreGui")
+
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(0, 140, 0, 45)
+btn.Position = UDim2.new(0.8, -70, 0.03, 0)
+btn.Text = "🔧 Auto Farm"
+btn.TextColor3 = Color3.fromRGB(255,255,255)
+btn.BackgroundColor3 = Color3.fromRGB(40,40,60)
+btn.BorderSizePixel = 2
+btn.BorderColor3 = Color3.fromRGB(0,200,255)
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 16
+btn.Parent = screenGui
+
+btn.MouseButton1Click:Connect(function()
+    toggleFarm()
+    btn.Text = AUTO_FARM and "✅ Farm ON" or "🔧 Auto Farm"
+    btn.BackgroundColor3 = AUTO_FARM and Color3.fromRGB(0,180,0) or Color3.fromRGB(40,40,60)
+end)
+
+print("✅ Script fix loaded. Press F9 or click button.")
